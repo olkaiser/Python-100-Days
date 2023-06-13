@@ -1,7 +1,3 @@
-# 每个表的表结构需要根据sheet页的表头来定义。
-# 	a.如何定义：读取sheet页时，直到读取到'asdfjkh'，则该行即为表头
-# 	b.数据插入的内容则为该行以下部分
-
 
 import os
 import re
