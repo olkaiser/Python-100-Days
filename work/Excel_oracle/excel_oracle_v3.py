@@ -18,6 +18,7 @@ connection = engine.connect()
 
 # 清空etl_log表
 connection.execute(text("DELETE FROM etl_log"))
+connection.commit() 
 
 # 遍历指定文件夹中的Excel文件
 folder_path = 'C:\\Users\\45434\\Desktop\\FAL'
@@ -35,19 +36,61 @@ for filename in os.listdir(folder_path):
                 # 读取整个sheet页
                 df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
 
-                # 找到包含'数据自编码(asdfjkh)'的行
+                # 找到包含'asdfjkh'的行
                 header_row = df[df.apply(lambda row: row.astype(str).str.contains('asdfjkh').any(), axis=1)].index[0]
 
                 # 将该行以下的所有行视为数据，该行视为表头
-                df.columns = df.iloc[header_row]
+                tmp_header = df.iloc[header_row]
+                # 存放临时行
+                tmp_row = df.iloc[header_row - 1]
                 df = df.iloc[header_row + 1:]
+
+                # 处理临时表头                
+                tmp_header = [re.sub(r'[^a-zA-Z0-9_]', '', f'tmp_{i}' if type(col) != type('str') else col) for i, col in enumerate(tmp_header, 1)]
+
+                # if header_row > 0:
+                #     tmp_row = df.iloc[header_row - 1]
+                # else:
+                #     tmp_row = 2  # 或者你可以选择一个合适的默认值
+
+                # 处理临时行，去除空值，只保留有效字符
+                # tmp_row = [re.sub(r'\W+', '', str(col)) if pd.notnull(col) and str(col).strip() != '' else '' for col in tmp_row]
+                tmp_row = [re.sub(r'[^a-zA-Z0-9_]', '', str(col)) if pd.notnull(col) and str(col).strip() != '' else '' for col in tmp_row]
+                # 删除空字符串
+                tmp_row = [col for col in tmp_row if col != '']
+
+                # 判断处理完成的临时表头是否有空值
+                if any('tmp_' in col for col in tmp_header):
+                    # 用处理完成的临时行依次填充，并生成一个新的表头
+                    tmp_count = 0
+                    final_header = []
+                    for col in tmp_header:
+                        if 'tmp_' in col:
+                            final_header.append(tmp_row[tmp_count])
+                            tmp_count += 1
+                        else:
+                            final_header.append(col)
+                else:
+                    # 用处理完成的临时表头作为数据库表的表结构
+                    final_header = tmp_header
+
+                # 将所有列转换为字符串类型
+                df = df.fillna(value='').astype(str)
 
                 # 添加data_date和transaction_date列
                 df['data_date'] = data_date
                 df['transaction_date'] = transaction_date
-
                 # 获取当前系统时间
-                run_time = datetime.now().strftime('%Y%m%d%H%M%S')
+                run_time = datetime.now().strftime('%Y.%m.%d %H:%M')
+
+                # 添加data_date和transaction_date列
+                final_header.extend(['data_date', 'transaction_date'])
+
+                # 删除数据框中的超出列名个数的列
+                # df = df.iloc[:, :len(final_header)+2]
+
+                # 将数据框的列名设置为final_header
+                df.columns = final_header
 
                 # 尝试将数据写入Oracle数据库
                 try:
@@ -56,11 +99,10 @@ for filename in os.listdir(folder_path):
                     # 如果表不存在，创建表
                     if 'table or view does not exist' in str(e):
                         metadata = MetaData()
-                        columns = [Column(re.sub(r'\W+', '', name), String(2000)) for name in df.columns]
+                        columns = [Column(name, String(2000)) for name in final_header]
                         table = Table(re.sub(r'\W+', '', sheet_name), metadata, *columns)
                         metadata.create_all(engine)
-
-                        # 再次尝试将数据写入表
+                    # 再次尝试将数据写入表
                         try:
                             df.to_sql(re.sub(r'\W+', '', sheet_name), engine, if_exists='append', index=False)
                         except exc.SQLAlchemyError as e:
@@ -71,6 +113,10 @@ for filename in os.listdir(folder_path):
                     connection.execute(text("INSERT INTO etl_log (table_name, sheet_name, data_date, run_time, status) VALUES (:1, :2, :3, :4, :5)"), {'1': filename, '2': sheet_name, '3': data_date, '4': run_time, '5': 1})
                 except exc.SQLAlchemyError as e:
                     connection.execute(text("INSERT INTO etl_log (table_name, sheet_name, data_date, run_time, status) VALUES (:1, :2, :3, :4, :5)"), {'1': filename, '2': sheet_name, '3': data_date, '4': run_time, '5': 0})
+                    print(f"Failed to write log to table etl_log: {e}")
+                    print('文件名：',filename,'sheet:',sheet_name,'日期：',data_date,'运行时间：',run_time)
+            connection.commit() 
 
+# connection.commit() 
 # 关闭数据库连接
 connection.close()
