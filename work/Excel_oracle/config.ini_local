@@ -1,0 +1,5 @@
+[DATABASE]
+ENGINE = oracle+cx_oracle://system:123888aBc@localhost:1521/ORCL
+
+[PATH]
+FOLDER_PATH = C:\\Users\\45434\\Desktop\\FAL
